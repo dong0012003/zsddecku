@@ -1,0 +1,92 @@
+# ============================================================
+# GitHub Actions —— 微信小程序自动构建与上传
+# 文件路径：.github/workflows/build-weapp.yml
+#
+# 触发方式：
+#   1. push 到 main 分支且 src/、config/、package.json 有变更
+#   2. 手动在 GitHub Actions 页面点击「Run workflow」
+#
+# GitHub Secrets 配置（Settings → Secrets and variables → Actions）：
+#   WEAPP_APPID                小程序 AppID
+#   WEAPP_PRIVATE_KEY          小程序上传密钥内容（完整文本）
+#   WEAPP_ROBOT                可选，CI 机器人编号，默认 1
+#   TARO_APP_SUPABASE_URL      可选，Supabase 项目 URL
+#   TARO_APP_SUPABASE_ANON_KEY 可选，Supabase anon key
+#
+# 上传密钥获取方式：
+#   小程序后台 → 开发 → 开发设置 → 小程序代码上传 → 生成上传密钥
+# ============================================================
+
+name: Build & Upload WeApp
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'config/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/build-weapp.yml'
+      - 'scripts/upload-weapp.js'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '上传版本号（例如 1.0.0-test）'
+        required: false
+        default: ''
+      desc:
+        description: '版本备注'
+        required: false
+        default: 'GitHub Actions 自动构建上传'
+
+jobs:
+  build-and-upload:
+    name: Build & Upload WeChat Mini Program
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. 检出代码 ─────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. 安装 Node + pnpm ─────────────────────────────────
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      # ── 3. 安装依赖 ─────────────────────────────────────────
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── 4. 构建微信小程序 ───────────────────────────────────
+      - name: Build weapp
+        env:
+          TARO_APP_SUPABASE_URL: ${{ secrets.TARO_APP_SUPABASE_URL }}
+          TARO_APP_SUPABASE_ANON_KEY: ${{ secrets.TARO_APP_SUPABASE_ANON_KEY }}
+        run: pnpm build:weapp
+
+      # ── 5. 上传到微信小程序后台 ───────────────────────────────
+      - name: Upload to WeChat
+        env:
+          WEAPP_APPID: ${{ secrets.WEAPP_APPID }}
+          WEAPP_PRIVATE_KEY: ${{ secrets.WEAPP_PRIVATE_KEY }}
+          WEAPP_ROBOT: ${{ secrets.WEAPP_ROBOT }}
+          WEAPP_VERSION: ${{ github.event.inputs.version }}
+          WEAPP_DESC: ${{ github.event.inputs.desc }}
+        run: node scripts/upload-weapp.js
+
+      # ── 6. 上传构建产物（可选）─────────────────────────────────
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: weapp-dist
+          path: dist/
+          retention-days: 7
